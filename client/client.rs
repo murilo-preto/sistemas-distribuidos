@@ -1,7 +1,7 @@
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 fn connect_to_server(address: &str) -> std::io::Result<TcpStream> {
@@ -12,31 +12,29 @@ fn connect_to_server(address: &str) -> std::io::Result<TcpStream> {
 
 fn get_input(prompt: &str) -> String {
     println!("{}", prompt);
-
     let mut input = String::new();
-    match io::stdin().read_line(&mut input) {
-        Ok(_) => input.trim().to_string(),
-        Err(e) => {
-            println!("Error reading input: {}", e);
-            String::new()
-        }
-    }
+    io::stdin()
+        .read_line(&mut input)
+        .expect("Failed to read input");
+    input.trim().to_string()
 }
 
 fn handle_server_connection(
     server_addr: &str,
     is_connected: Arc<AtomicBool>,
+    stream: Arc<Mutex<Option<TcpStream>>>,
 ) -> std::io::Result<()> {
     match connect_to_server(server_addr) {
-        Ok(mut stream) => {
+        Ok(mut s) => {
             is_connected.store(true, Ordering::SeqCst);
             let message = "Hello from client!";
-            match stream.write_all(message.as_bytes()) {
+            match s.write_all(message.as_bytes()) {
                 Ok(_) => {
                     println!("Sent initial message: '{}'", message);
+                    *stream.lock().unwrap() = Some(s);
 
                     let mut buffer = [0; 1024];
-                    match stream.read(&mut buffer) {
+                    match stream.lock().unwrap().as_mut().unwrap().read(&mut buffer) {
                         Ok(bytes_read) if bytes_read > 0 => {
                             println!(
                                 "Initial response: {}",
@@ -51,6 +49,7 @@ fn handle_server_connection(
                         }
                         Err(e) => {
                             is_connected.store(false, Ordering::SeqCst);
+                            *stream.lock().unwrap() = None;
                             println!("Error reading from {}: {}", server_addr, e);
                             Err(e)
                         }
@@ -58,6 +57,7 @@ fn handle_server_connection(
                 }
                 Err(e) => {
                     is_connected.store(false, Ordering::SeqCst);
+                    *stream.lock().unwrap() = None;
                     println!("Error sending to {}: {}", server_addr, e);
                     Err(e)
                 }
@@ -65,56 +65,105 @@ fn handle_server_connection(
         }
         Err(e) => {
             is_connected.store(false, Ordering::SeqCst);
+            *stream.lock().unwrap() = None;
             println!("Failed to connect to {}: {}", server_addr, e);
             Err(e)
         }
     }
 }
 
+fn send_command(
+    stream: &Arc<Mutex<Option<TcpStream>>>,
+    command: &str,
+    is_connected: &Arc<AtomicBool>,
+) -> std::io::Result<()> {
+    if let Some(stream) = &mut *stream.lock().unwrap() {
+        println!("Sending: {}", command);
+        stream.write_all(command.as_bytes())?;
+
+        let mut buffer = [0; 1024];
+        match stream.read(&mut buffer) {
+            Ok(bytes_read) if bytes_read > 0 => {
+                println!(
+                    "Server response: {}",
+                    String::from_utf8_lossy(&buffer[0..bytes_read])
+                );
+                Ok(())
+            }
+            Ok(_) => {
+                println!("No response from server");
+                Ok(())
+            }
+            Err(e) => {
+                is_connected.store(false, Ordering::SeqCst);
+                Err(e)
+            }
+        }
+    } else {
+        println!("Connection lost");
+        is_connected.store(false, Ordering::SeqCst);
+        Err(io::Error::new(
+            io::ErrorKind::NotConnected,
+            "Not connected to server",
+        ))
+    }
+}
+
 fn main() -> std::io::Result<()> {
     let running = Arc::new(AtomicBool::new(true));
     let is_connected = Arc::new(AtomicBool::new(false));
+    let stream = Arc::new(Mutex::new(None::<TcpStream>));
 
-    // Main command loop
     println!(
         "---\nType:\nINIT - Connect to server\nPUT - To write to database\nGET - To retrieve from database\nEXIT - To quit\n---\n"
     );
+
     loop {
-        let action = get_input("").to_lowercase();
+        let action = get_input("Enter command:").to_lowercase();
 
         match action.as_str() {
             "init" => {
                 if is_connected.load(Ordering::SeqCst) {
                     println!("Already connected to a server");
-                } else if running.load(Ordering::SeqCst) {
+                } else {
                     let servers = ["127.0.0.1:10097", "127.0.0.1:10098", "127.0.0.1:10099"];
                     let is_connected_clone = is_connected.clone();
+                    let stream_clone = stream.clone();
 
                     thread::spawn(move || {
                         for server_addr in &servers {
-                            if let Ok(_) =
-                                handle_server_connection(server_addr, is_connected_clone.clone())
+                            if handle_server_connection(
+                                server_addr,
+                                is_connected_clone.clone(),
+                                stream_clone.clone(),
+                            )
+                            .is_ok()
                             {
                                 break;
                             }
                         }
                     });
-                } else {
-                    println!("Shutdown in progress, cannot initialize new connection");
                 }
             }
             "put" => {
                 if is_connected.load(Ordering::SeqCst) {
-                    println!("PUT operation selected");
-                    // Add your PUT logic here
+                    let key = get_input("Enter key:");
+                    let value = get_input("Enter value:");
+                    let command = format!("PUT {} {}\n", key, value);
+                    if let Err(e) = send_command(&stream, &command, &is_connected) {
+                        println!("Error sending PUT command: {}", e);
+                    }
                 } else {
                     println!("Not connected to any server. Use INIT first");
                 }
             }
             "get" => {
                 if is_connected.load(Ordering::SeqCst) {
-                    println!("GET operation selected");
-                    // Add your GET logic here
+                    let key = get_input("Enter key:");
+                    let command = format!("GET {}\n", key);
+                    if let Err(e) = send_command(&stream, &command, &is_connected) {
+                        println!("Error sending GET command: {}", e);
+                    }
                 } else {
                     println!("Not connected to any server. Use INIT first");
                 }
