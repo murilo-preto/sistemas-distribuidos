@@ -3,7 +3,6 @@ use std::net::TcpStream;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
-use std::time::Duration;
 
 fn connect_to_server(address: &str) -> std::io::Result<TcpStream> {
     let stream = TcpStream::connect(address)?;
@@ -26,7 +25,6 @@ fn get_input(prompt: &str) -> String {
 
 fn handle_server_connection(
     server_addr: &str,
-    running: Arc<AtomicBool>,
     is_connected: Arc<AtomicBool>,
 ) -> std::io::Result<()> {
     match connect_to_server(server_addr) {
@@ -90,16 +88,13 @@ fn main() -> std::io::Result<()> {
                     println!("Already connected to a server");
                 } else if running.load(Ordering::SeqCst) {
                     let servers = ["127.0.0.1:10097", "127.0.0.1:10098", "127.0.0.1:10099"];
-                    let running_clone = running.clone();
                     let is_connected_clone = is_connected.clone();
 
                     thread::spawn(move || {
                         for server_addr in &servers {
-                            if let Ok(_) = handle_server_connection(
-                                server_addr,
-                                running_clone.clone(),
-                                is_connected_clone.clone(),
-                            ) {
+                            if let Ok(_) =
+                                handle_server_connection(server_addr, is_connected_clone.clone())
+                            {
                                 break;
                             }
                         }
