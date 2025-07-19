@@ -11,9 +11,23 @@ fn connect_to_server(address: &str) -> std::io::Result<TcpStream> {
     Ok(stream)
 }
 
+fn get_input(prompt: &str) -> String {
+    println!("{}", prompt);
+    
+    let mut input = String::new();
+    match io::stdin().read_line(&mut input) {
+        Ok(_) => input.trim().to_string(),
+        Err(e) => {
+            println!("Error reading input: {}", e);
+            String::new()
+        }
+    }
+}
+
 fn main() -> std::io::Result<()> {
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
+    let mut is_connected = false;
 
     // Set up Ctrl+C handler
     ctrlc::set_handler(move || {
@@ -22,14 +36,25 @@ fn main() -> std::io::Result<()> {
     })
     .expect("Error setting Ctrl+C handler");
 
-    let servers = ["127.0.0.1:10097", "127.0.0.1:10098", "127.0.0.1:10099"];
+    let mut action = get_input("Type:\nINIT - For initialising the client\nPUT - To write to database\nGET - To retrieve from database\n");
+    action = action.to_lowercase();
+    println!("Action {}", action);
 
+    match action.as_str() {
+        "init" => println!("a"),
+        "get" => println!("b"),
+        "put" => println!("c"),
+        _ => println!("Unknown"),
+    }
+
+    let servers = ["127.0.0.1:10097", "127.0.0.1:10098", "127.0.0.1:10099"];
     for server_addr in &servers {
         match connect_to_server(server_addr) {
             Ok(mut stream) => {
-                // Send initial message
+                is_connected = true;
                 let message = "Hello from client!";
                 match stream.write_all(message.as_bytes()) {
+                    // On sucessfull conection
                     Ok(_) => {
                         println!("Sent initial message: '{}'", message);
 
@@ -44,7 +69,7 @@ fn main() -> std::io::Result<()> {
 
                                 println!("Connected successfully! Press Ctrl+C to disconnect.");
 
-                                // Keep connection alive until signal
+                                // Keep  alive until end signal
                                 while running.load(Ordering::SeqCst) {
                                     thread::sleep(Duration::from_millis(100));
                                 }
@@ -60,6 +85,7 @@ fn main() -> std::io::Result<()> {
                             }
                         }
                     }
+                    // On failed connection
                     Err(e) => {
                         println!("Error sending to {}: {}", server_addr, e);
                     }
