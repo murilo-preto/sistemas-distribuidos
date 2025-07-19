@@ -24,16 +24,19 @@ fn get_input(prompt: &str) -> String {
     }
 }
 
-fn handle_server_connection(server_addr: &str, running: Arc<AtomicBool>) -> std::io::Result<()> {
+fn handle_server_connection(
+    server_addr: &str,
+    running: Arc<AtomicBool>,
+    is_connected: Arc<AtomicBool>,
+) -> std::io::Result<()> {
     match connect_to_server(server_addr) {
         Ok(mut stream) => {
+            is_connected.store(true, Ordering::SeqCst);
             let message = "Hello from client!";
             match stream.write_all(message.as_bytes()) {
-                // On successful connection
                 Ok(_) => {
                     println!("Sent initial message: '{}'", message);
 
-                    // Read initial response
                     let mut buffer = [0; 1024];
                     match stream.read(&mut buffer) {
                         Ok(bytes_read) if bytes_read > 0 => {
@@ -41,15 +44,7 @@ fn handle_server_connection(server_addr: &str, running: Arc<AtomicBool>) -> std:
                                 "Initial response: {}",
                                 String::from_utf8_lossy(&buffer[0..bytes_read])
                             );
-
-                            println!("Connected successfully! Press Ctrl+C to disconnect.");
-
-                            // Keep alive until end signal
-                            while running.load(Ordering::SeqCst) {
-                                thread::sleep(Duration::from_millis(100));
-                            }
-
-                            println!("Disconnecting from {}...", server_addr);
+                            println!("Connected successfully!");
                             Ok(())
                         }
                         Ok(_) => {
@@ -57,19 +52,21 @@ fn handle_server_connection(server_addr: &str, running: Arc<AtomicBool>) -> std:
                             Ok(())
                         }
                         Err(e) => {
+                            is_connected.store(false, Ordering::SeqCst);
                             println!("Error reading from {}: {}", server_addr, e);
                             Err(e)
                         }
                     }
                 }
-                // On failed connection
                 Err(e) => {
+                    is_connected.store(false, Ordering::SeqCst);
                     println!("Error sending to {}: {}", server_addr, e);
                     Err(e)
                 }
             }
         }
         Err(e) => {
+            is_connected.store(false, Ordering::SeqCst);
             println!("Failed to connect to {}: {}", server_addr, e);
             Err(e)
         }
@@ -78,38 +75,63 @@ fn handle_server_connection(server_addr: &str, running: Arc<AtomicBool>) -> std:
 
 fn main() -> std::io::Result<()> {
     let running = Arc::new(AtomicBool::new(true));
-    let r = running.clone();
-    let mut is_connected = false;
+    let is_connected = Arc::new(AtomicBool::new(false));
 
-    // Set up Ctrl+C handler
-    ctrlc::set_handler(move || {
-        println!("\nReceived Ctrl+C signal. Shutting down...");
-        r.store(false, Ordering::SeqCst);
-    })
-    .expect("Error setting Ctrl+C handler");
-
-    let mut action = get_input(
-        "---\nType:\nINIT - For initialising the client\nPUT - To write to database\nGET - To retrieve from database\n---\n",
+    // Main command loop
+    println!(
+        "---\nType:\nINIT - Connect to server\nPUT - To write to database\nGET - To retrieve from database\nEXIT - To quit\n---\n"
     );
-    action = action.to_lowercase();
+    loop {
+        let action = get_input("").to_lowercase();
 
-    match action.as_str() {
-        "init" => {
-            let servers = ["127.0.0.1:10097", "127.0.0.1:10098", "127.0.0.1:10099"];
-            for server_addr in &servers {
-                if let Ok(_) = handle_server_connection(server_addr, running.clone()) {
-                    is_connected = true;
-                    break;
+        match action.as_str() {
+            "init" => {
+                if is_connected.load(Ordering::SeqCst) {
+                    println!("Already connected to a server");
+                } else if running.load(Ordering::SeqCst) {
+                    let servers = ["127.0.0.1:10097", "127.0.0.1:10098", "127.0.0.1:10099"];
+                    let running_clone = running.clone();
+                    let is_connected_clone = is_connected.clone();
+
+                    thread::spawn(move || {
+                        for server_addr in &servers {
+                            if let Ok(_) = handle_server_connection(
+                                server_addr,
+                                running_clone.clone(),
+                                is_connected_clone.clone(),
+                            ) {
+                                break;
+                            }
+                        }
+                    });
+                } else {
+                    println!("Shutdown in progress, cannot initialize new connection");
                 }
             }
-
-            if !is_connected {
-                println!("No servers responded successfully");
+            "put" => {
+                if is_connected.load(Ordering::SeqCst) {
+                    println!("PUT operation selected");
+                    // Add your PUT logic here
+                } else {
+                    println!("Not connected to any server. Use INIT first");
+                }
             }
+            "get" => {
+                if is_connected.load(Ordering::SeqCst) {
+                    println!("GET operation selected");
+                    // Add your GET logic here
+                } else {
+                    println!("Not connected to any server. Use INIT first");
+                }
+            }
+            "exit" => {
+                println!("Exiting...");
+                running.store(false, Ordering::SeqCst);
+                is_connected.store(false, Ordering::SeqCst);
+                break;
+            }
+            _ => println!("Unknown command"),
         }
-        "put" => println!("b"),
-        "get" => println!("c"),
-        _ => println!("Unknown"),
     }
 
     Ok(())
