@@ -1,0 +1,11 @@
+[package]
+name = "client"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ctrlc = "3.0"
+
+[[bin]]
+name = "client"
+path = "client.rs"
