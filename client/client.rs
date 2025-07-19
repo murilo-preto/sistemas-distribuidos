@@ -13,13 +13,65 @@ fn connect_to_server(address: &str) -> std::io::Result<TcpStream> {
 
 fn get_input(prompt: &str) -> String {
     println!("{}", prompt);
-    
+
     let mut input = String::new();
     match io::stdin().read_line(&mut input) {
         Ok(_) => input.trim().to_string(),
         Err(e) => {
             println!("Error reading input: {}", e);
             String::new()
+        }
+    }
+}
+
+fn handle_server_connection(server_addr: &str, running: Arc<AtomicBool>) -> std::io::Result<()> {
+    match connect_to_server(server_addr) {
+        Ok(mut stream) => {
+            let message = "Hello from client!";
+            match stream.write_all(message.as_bytes()) {
+                // On successful connection
+                Ok(_) => {
+                    println!("Sent initial message: '{}'", message);
+
+                    // Read initial response
+                    let mut buffer = [0; 1024];
+                    match stream.read(&mut buffer) {
+                        Ok(bytes_read) if bytes_read > 0 => {
+                            println!(
+                                "Initial response: {}",
+                                String::from_utf8_lossy(&buffer[0..bytes_read])
+                            );
+
+                            println!("Connected successfully! Press Ctrl+C to disconnect.");
+
+                            // Keep alive until end signal
+                            while running.load(Ordering::SeqCst) {
+                                thread::sleep(Duration::from_millis(100));
+                            }
+
+                            println!("Disconnecting from {}...", server_addr);
+                            Ok(())
+                        }
+                        Ok(_) => {
+                            println!("Connected to {} but received no response", server_addr);
+                            Ok(())
+                        }
+                        Err(e) => {
+                            println!("Error reading from {}: {}", server_addr, e);
+                            Err(e)
+                        }
+                    }
+                }
+                // On failed connection
+                Err(e) => {
+                    println!("Error sending to {}: {}", server_addr, e);
+                    Err(e)
+                }
+            }
+        }
+        Err(e) => {
+            println!("Failed to connect to {}: {}", server_addr, e);
+            Err(e)
         }
     }
 }
@@ -36,67 +88,29 @@ fn main() -> std::io::Result<()> {
     })
     .expect("Error setting Ctrl+C handler");
 
-    let mut action = get_input("Type:\nINIT - For initialising the client\nPUT - To write to database\nGET - To retrieve from database\n");
+    let mut action = get_input(
+        "---\nType:\nINIT - For initialising the client\nPUT - To write to database\nGET - To retrieve from database\n---\n",
+    );
     action = action.to_lowercase();
-    println!("Action {}", action);
 
     match action.as_str() {
-        "init" => println!("a"),
-        "get" => println!("b"),
-        "put" => println!("c"),
+        "init" => {
+            let servers = ["127.0.0.1:10097", "127.0.0.1:10098", "127.0.0.1:10099"];
+            for server_addr in &servers {
+                if let Ok(_) = handle_server_connection(server_addr, running.clone()) {
+                    is_connected = true;
+                    break;
+                }
+            }
+
+            if !is_connected {
+                println!("No servers responded successfully");
+            }
+        }
+        "put" => println!("b"),
+        "get" => println!("c"),
         _ => println!("Unknown"),
     }
 
-    let servers = ["127.0.0.1:10097", "127.0.0.1:10098", "127.0.0.1:10099"];
-    for server_addr in &servers {
-        match connect_to_server(server_addr) {
-            Ok(mut stream) => {
-                is_connected = true;
-                let message = "Hello from client!";
-                match stream.write_all(message.as_bytes()) {
-                    // On sucessfull conection
-                    Ok(_) => {
-                        println!("Sent initial message: '{}'", message);
-
-                        // Read initial response
-                        let mut buffer = [0; 1024];
-                        match stream.read(&mut buffer) {
-                            Ok(bytes_read) if bytes_read > 0 => {
-                                println!(
-                                    "Initial response: {}",
-                                    String::from_utf8_lossy(&buffer[0..bytes_read])
-                                );
-
-                                println!("Connected successfully! Press Ctrl+C to disconnect.");
-
-                                // Keep  alive until end signal
-                                while running.load(Ordering::SeqCst) {
-                                    thread::sleep(Duration::from_millis(100));
-                                }
-
-                                println!("Disconnecting from {}...", server_addr);
-                                return Ok(());
-                            }
-                            Ok(_) => {
-                                println!("Connected to {} but received no response", server_addr);
-                            }
-                            Err(e) => {
-                                println!("Error reading from {}: {}", server_addr, e);
-                            }
-                        }
-                    }
-                    // On failed connection
-                    Err(e) => {
-                        println!("Error sending to {}: {}", server_addr, e);
-                    }
-                }
-            }
-            Err(e) => {
-                println!("Failed to connect to {}: {}", server_addr, e);
-            }
-        }
-    }
-
-    println!("No servers responded successfully");
     Ok(())
 }
