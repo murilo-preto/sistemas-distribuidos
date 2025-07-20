@@ -6,6 +6,12 @@ fn handle_client(mut stream: TcpStream, port: u16) {
     println!("[Port {}] Client connected", port);
     let mut buffer = [0; 1024];
 
+    let mut is_leader = false;
+    if port == 10097 {
+        is_leader = true;
+    }
+    println!("Is leader : {is_leader}");
+
     loop {
         match stream.read(&mut buffer) {
             Ok(0) => {
@@ -15,6 +21,15 @@ fn handle_client(mut stream: TcpStream, port: u16) {
             Ok(n) => {
                 let message = String::from_utf8_lossy(&buffer[0..n]);
                 println!("[Port {}] Received: {}", port, message.trim());
+
+                let action = message.split_whitespace().next().unwrap_or("").to_lowercase();
+                println!("{}", action);
+
+                match action.as_str() {
+                    "put" => println!("received put"),
+                    "get" => println!("received get"),
+                    _ => println!("received unknown command"),
+                }
 
                 // Send response
                 let response = format!("Echo from server on port {}: {}", port, message);
