@@ -149,7 +149,7 @@ fn main() -> std::io::Result<()> {
                 if is_connected.load(Ordering::SeqCst) {
                     let key = get_input("Enter key:");
                     let value = get_input("Enter value:");
-                    let command = format!("PUT {} {}\n", key, value);
+                    let command = format!("put {} {}\n", key, value);
                     if let Err(e) = send_command(&stream, &command, &is_connected) {
                         println!("Error sending PUT command: {}", e);
                     }
@@ -160,7 +160,7 @@ fn main() -> std::io::Result<()> {
             "get" => {
                 if is_connected.load(Ordering::SeqCst) {
                     let key = get_input("Enter key:");
-                    let command = format!("GET {}\n", key);
+                    let command = format!("get {}\n", key);
                     if let Err(e) = send_command(&stream, &command, &is_connected) {
                         println!("Error sending GET command: {}", e);
                     }
