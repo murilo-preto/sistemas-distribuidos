@@ -24,16 +24,13 @@ fn handle_client(mut stream: TcpStream, port: u16, db: Arc<Mutex<HashMap<String,
                 let response = match parts.as_slice() {
                     ["put", key, value] => {
                         on_put(key.to_string(), value.to_string(), port, Arc::clone(&db))
-                    },
-                    ["get", key] => {
-                        on_get(key.to_string(), Arc::clone(&db))
-                    },
+                    }
+                    ["get", key] => on_get(key.to_string(), Arc::clone(&db)),
                     ["put", ..] => "ERR: PUT requires 2 arguments".to_string(),
                     ["get", ..] => "ERR: GET requires 1 argument".to_string(),
                     _ => "ERR: Unknown command (valid: PUT <key> <value> | GET <key>)".to_string(),
                 };
 
-                // Send only one response
                 if stream.write_all(response.as_bytes()).is_err() {
                     break;
                 }
@@ -67,7 +64,12 @@ fn start_server(port: u16) -> std::io::Result<()> {
     Ok(())
 }
 
-fn on_put(key: String, value: String, port: u16, db: Arc<Mutex<HashMap<String, String>>>) -> String {
+fn on_put(
+    key: String,
+    value: String,
+    port: u16,
+    db: Arc<Mutex<HashMap<String, String>>>,
+) -> String {
     if port == 10097 {
         let mut db = db.lock().unwrap();
         db.insert(key.clone(), value.clone());
