@@ -4,11 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-fn connect_to_server(address: &str) -> std::io::Result<TcpStream> {
-    let stream = TcpStream::connect(address)?;
-    println!("Connected to {address}");
-    Ok(stream)
-}
+use shared::{connect_to_server, send_command};
 
 fn get_input(prompt: &str) -> String {
     println!("{prompt}");
@@ -69,43 +65,6 @@ fn handle_server_connection(
             println!("Failed to connect to {server_addr}: {e}");
             Err(e)
         }
-    }
-}
-
-fn send_command(
-    stream: &Arc<Mutex<Option<TcpStream>>>,
-    command: &str,
-    is_connected: &Arc<AtomicBool>,
-) -> std::io::Result<()> {
-    if let Some(stream) = &mut *stream.lock().unwrap() {
-        println!("Sending: {command}");
-        stream.write_all(command.as_bytes())?;
-
-        let mut buffer = [0; 1024];
-        match stream.read(&mut buffer) {
-            Ok(bytes_read) if bytes_read > 0 => {
-                println!(
-                    "Server response: {}",
-                    String::from_utf8_lossy(&buffer[0..bytes_read])
-                );
-                Ok(())
-            }
-            Ok(_) => {
-                println!("No response from server");
-                Ok(())
-            }
-            Err(e) => {
-                is_connected.store(false, Ordering::SeqCst);
-                Err(e)
-            }
-        }
-    } else {
-        println!("Connection lost");
-        is_connected.store(false, Ordering::SeqCst);
-        Err(io::Error::new(
-            io::ErrorKind::NotConnected,
-            "Not connected to server",
-        ))
     }
 }
 
