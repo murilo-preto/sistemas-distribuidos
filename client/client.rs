@@ -27,7 +27,7 @@ fn handle_server_connection(
     match connect_to_server(server_addr) {
         Ok(mut s) => {
             is_connected.store(true, Ordering::SeqCst);
-            let message = "Hello from client!";
+            let message = "new_connection";
             match s.write_all(message.as_bytes()) {
                 Ok(_) => {
                     println!("Sent initial message: '{message}'");

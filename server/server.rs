@@ -28,6 +28,7 @@ fn handle_client(mut stream: TcpStream, port: u16, db: Arc<Mutex<HashMap<String,
                     ["get", key] => on_get(key.to_string(), Arc::clone(&db)),
                     ["put", ..] => "ERR: PUT requires 2 arguments".to_string(),
                     ["get", ..] => "ERR: GET requires 1 argument".to_string(),
+                    ["new_connection"] => "Client requested new connetion".to_string(),
                     _ => "ERR: Unknown command (valid: PUT <key> <value> | GET <key>)".to_string(),
                 };
 

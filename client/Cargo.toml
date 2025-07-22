@@ -4,7 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-ctrlc = "3.0"
+#ctrlc = "3.0"
+shared = { version = "0.1.0", path = "../shared" }
 
 [[bin]]
 name = "client"
