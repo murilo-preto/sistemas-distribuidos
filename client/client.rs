@@ -6,12 +6,12 @@ use std::thread;
 
 fn connect_to_server(address: &str) -> std::io::Result<TcpStream> {
     let stream = TcpStream::connect(address)?;
-    println!("Connected to {}", address);
+    println!("Connected to {address}");
     Ok(stream)
 }
 
 fn get_input(prompt: &str) -> String {
-    println!("{}", prompt);
+    println!("{prompt}");
     let mut input = String::new();
     io::stdin()
         .read_line(&mut input)
@@ -30,7 +30,7 @@ fn handle_server_connection(
             let message = "Hello from client!";
             match s.write_all(message.as_bytes()) {
                 Ok(_) => {
-                    println!("Sent initial message: '{}'", message);
+                    println!("Sent initial message: '{message}'");
                     *stream.lock().unwrap() = Some(s);
 
                     let mut buffer = [0; 1024];
@@ -44,13 +44,13 @@ fn handle_server_connection(
                             Ok(())
                         }
                         Ok(_) => {
-                            println!("Connected to {} but received no response", server_addr);
+                            println!("Connected to {server_addr} but received no response");
                             Ok(())
                         }
                         Err(e) => {
                             is_connected.store(false, Ordering::SeqCst);
                             *stream.lock().unwrap() = None;
-                            println!("Error reading from {}: {}", server_addr, e);
+                            println!("Error reading from {server_addr}: {e}");
                             Err(e)
                         }
                     }
@@ -58,7 +58,7 @@ fn handle_server_connection(
                 Err(e) => {
                     is_connected.store(false, Ordering::SeqCst);
                     *stream.lock().unwrap() = None;
-                    println!("Error sending to {}: {}", server_addr, e);
+                    println!("Error sending to {server_addr}: {e}");
                     Err(e)
                 }
             }
@@ -66,7 +66,7 @@ fn handle_server_connection(
         Err(e) => {
             is_connected.store(false, Ordering::SeqCst);
             *stream.lock().unwrap() = None;
-            println!("Failed to connect to {}: {}", server_addr, e);
+            println!("Failed to connect to {server_addr}: {e}");
             Err(e)
         }
     }
@@ -78,7 +78,7 @@ fn send_command(
     is_connected: &Arc<AtomicBool>,
 ) -> std::io::Result<()> {
     if let Some(stream) = &mut *stream.lock().unwrap() {
-        println!("Sending: {}", command);
+        println!("Sending: {command}");
         stream.write_all(command.as_bytes())?;
 
         let mut buffer = [0; 1024];
@@ -149,9 +149,9 @@ fn main() -> std::io::Result<()> {
                 if is_connected.load(Ordering::SeqCst) {
                     let key = get_input("Enter key:");
                     let value = get_input("Enter value:");
-                    let command = format!("put {} {}\n", key, value);
+                    let command = format!("put {key} {value}\n");
                     if let Err(e) = send_command(&stream, &command, &is_connected) {
-                        println!("Error sending PUT command: {}", e);
+                        println!("Error sending PUT command: {e}");
                     }
                 } else {
                     println!("Not connected to any server. Use INIT first");
@@ -160,9 +160,9 @@ fn main() -> std::io::Result<()> {
             "get" => {
                 if is_connected.load(Ordering::SeqCst) {
                     let key = get_input("Enter key:");
-                    let command = format!("get {}\n", key);
+                    let command = format!("get {key}\n");
                     if let Err(e) = send_command(&stream, &command, &is_connected) {
-                        println!("Error sending GET command: {}", e);
+                        println!("Error sending GET command: {e}");
                     }
                 } else {
                     println!("Not connected to any server. Use INIT first");

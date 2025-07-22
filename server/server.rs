@@ -4,14 +4,70 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+fn connect_to_server(address: &str) -> std::io::Result<TcpStream> {
+    let stream = TcpStream::connect(address)?;
+    println!("Connected to {address}");
+    Ok(stream)
+}
+
+fn put_handover(
+    server_addr: &str,
+    stream: Arc<Mutex<Option<TcpStream>>>,
+    key: String,
+    value: String,
+) -> std::io::Result<()> {
+    match connect_to_server(server_addr) {
+        Ok(mut s) => {
+            let put_req_data = format!("put {key} {value}");
+            match s.write_all(put_req_data.as_bytes()) {
+                Ok(_) => {
+                    println!("Sent put request: '{put_req_data}'");
+                    *stream.lock().unwrap() = Some(s);
+
+                    let mut buffer = [0; 1024];
+                    match stream.lock().unwrap().as_mut().unwrap().read(&mut buffer) {
+                        Ok(bytes_read) if bytes_read > 0 => {
+                            println!(
+                                "Initial response: {}",
+                                String::from_utf8_lossy(&buffer[0..bytes_read])
+                            );
+                            println!("Connected successfully!");
+                            Ok(())
+                        }
+                        Ok(_) => {
+                            println!("Connected to {server_addr} but received no response");
+                            Ok(())
+                        }
+                        Err(e) => {
+                            *stream.lock().unwrap() = None;
+                            println!("Error reading from {server_addr}: {e}");
+                            Err(e)
+                        }
+                    }
+                }
+                Err(e) => {
+                    *stream.lock().unwrap() = None;
+                    println!("Error sending to {server_addr}: {e}");
+                    Err(e)
+                }
+            }
+        }
+        Err(e) => {
+            *stream.lock().unwrap() = None;
+            println!("Failed to connect to {server_addr}: {e}");
+            Err(e)
+        }
+    }
+}
+
 fn handle_client(mut stream: TcpStream, port: u16, db: Arc<Mutex<HashMap<String, String>>>) {
-    println!("[Port {}] Client connected", port);
+    println!("[Port {port}] Client connected");
     let mut buffer = [0; 1024];
 
     loop {
         match stream.read(&mut buffer) {
             Ok(0) => {
-                println!("[Port {}] Client disconnected", port);
+                println!("[Port {port}] Client disconnected");
                 break;
             }
             Ok(n) => {
@@ -36,7 +92,7 @@ fn handle_client(mut stream: TcpStream, port: u16, db: Arc<Mutex<HashMap<String,
                 }
             }
             Err(e) => {
-                println!("[Port {}] Error reading from client: {}", port, e);
+                println!("[Port {port}] Error reading from client: {e}");
                 break;
             }
         }
@@ -44,8 +100,8 @@ fn handle_client(mut stream: TcpStream, port: u16, db: Arc<Mutex<HashMap<String,
 }
 
 fn start_server(port: u16) -> std::io::Result<()> {
-    let listener = TcpListener::bind(format!("127.0.0.1:{}", port))?;
-    println!("Server listening on 127.0.0.1:{}", port);
+    let listener = TcpListener::bind(format!("127.0.0.1:{port}"))?;
+    println!("Server listening on 127.0.0.1:{port}");
 
     let database: HashMap<String, String> = HashMap::new();
     let shared_db = Arc::new(Mutex::new(database));
@@ -58,7 +114,7 @@ fn start_server(port: u16) -> std::io::Result<()> {
                     handle_client(stream, port, db_clone);
                 });
             }
-            Err(e) => println!("[Port {}] Error: {}", port, e),
+            Err(e) => println!("[Port {port}] Error: {e}"),
         }
     }
     Ok(())
@@ -73,18 +129,18 @@ fn on_put(
     if port == 10097 {
         let mut db = db.lock().unwrap();
         db.insert(key.clone(), value.clone());
-        println!("[Leader] Added key: {}", key);
-        format!("OK: Inserted '{}'='{}'", key, value)
+        println!("[Leader] Added key: {key}");
+        format!("OK: Inserted '{key}'='{value}'")
     } else {
-        format!("ERR: Server on port {} is not leader", port)
+        format!("ERR: Server on port {port} is not leader")
     }
 }
 
 fn on_get(key: String, db: Arc<Mutex<HashMap<String, String>>>) -> String {
     let db = db.lock().unwrap();
     match db.get(&key) {
-        Some(value) => format!("OK: {}={}", key, value),
-        None => format!("ERR: Key '{}' not found", key),
+        Some(value) => format!("OK: {key}={value}"),
+        None => format!("ERR: Key '{key}' not found"),
     }
 }
 
@@ -104,6 +160,6 @@ fn main() -> std::io::Result<()> {
         }
     };
 
-    println!("Starting server on port {}...", port);
+    println!("Starting server on port {port}...");
     start_server(port)
 }
