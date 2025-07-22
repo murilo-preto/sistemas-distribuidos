@@ -4,62 +4,6 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-fn connect_to_server(address: &str) -> std::io::Result<TcpStream> {
-    let stream = TcpStream::connect(address)?;
-    println!("Connected to {address}");
-    Ok(stream)
-}
-
-fn put_handover(
-    server_addr: &str,
-    stream: Arc<Mutex<Option<TcpStream>>>,
-    key: String,
-    value: String,
-) -> std::io::Result<()> {
-    match connect_to_server(server_addr) {
-        Ok(mut s) => {
-            let put_req_data = format!("put {key} {value}");
-            match s.write_all(put_req_data.as_bytes()) {
-                Ok(_) => {
-                    println!("Sent put request: '{put_req_data}'");
-                    *stream.lock().unwrap() = Some(s);
-
-                    let mut buffer = [0; 1024];
-                    match stream.lock().unwrap().as_mut().unwrap().read(&mut buffer) {
-                        Ok(bytes_read) if bytes_read > 0 => {
-                            println!(
-                                "Initial response: {}",
-                                String::from_utf8_lossy(&buffer[0..bytes_read])
-                            );
-                            println!("Connected successfully!");
-                            Ok(())
-                        }
-                        Ok(_) => {
-                            println!("Connected to {server_addr} but received no response");
-                            Ok(())
-                        }
-                        Err(e) => {
-                            *stream.lock().unwrap() = None;
-                            println!("Error reading from {server_addr}: {e}");
-                            Err(e)
-                        }
-                    }
-                }
-                Err(e) => {
-                    *stream.lock().unwrap() = None;
-                    println!("Error sending to {server_addr}: {e}");
-                    Err(e)
-                }
-            }
-        }
-        Err(e) => {
-            *stream.lock().unwrap() = None;
-            println!("Failed to connect to {server_addr}: {e}");
-            Err(e)
-        }
-    }
-}
-
 fn handle_client(mut stream: TcpStream, port: u16, db: Arc<Mutex<HashMap<String, String>>>) {
     println!("[Port {port}] Client connected");
     let mut buffer = [0; 1024];
