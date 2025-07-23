@@ -1,3 +1,4 @@
+use core::time;
 use rand::rng;
 use rand::seq::SliceRandom;
 use std::io::{self, Read, Write};
@@ -5,8 +6,9 @@ use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::SystemTime;
 
-use shared::{connect_to_server, send_command};
+use shared::{Message, connect_to_server, send_command};
 
 fn get_input(prompt: &str) -> String {
     println!("{prompt}");
@@ -113,7 +115,18 @@ fn main() -> std::io::Result<()> {
                 if is_connected.load(Ordering::SeqCst) {
                     let key = get_input("Enter key:");
                     let value = get_input("Enter value:");
+                    let timestamp = SystemTime::now();
                     let command = format!("put {key} {value}\n");
+
+                    let msg = Message {
+                        command: command.clone(),
+                        key,
+                        value,
+                        timestamp,
+                    };
+
+                    println!("Debug Message:\n{:#?}", msg);
+
                     if let Err(e) = send_command(&stream, &command, &is_connected) {
                         println!("Error sending PUT command: {e}");
                     }

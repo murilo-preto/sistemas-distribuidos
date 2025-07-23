@@ -2,6 +2,15 @@ use std::io::{self, Read, Write};
 use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
+
+#[derive(Debug)]
+pub struct Message {
+    pub command: String,
+    pub key: String,
+    pub value: String,
+    pub timestamp: SystemTime,
+}
 
 pub fn connect_to_server(address: &str) -> io::Result<TcpStream> {
     let stream = TcpStream::connect(address)?;

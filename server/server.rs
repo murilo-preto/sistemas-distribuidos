@@ -3,6 +3,7 @@ use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::SystemTime;
 
 struct ServerState {
     db: Arc<Mutex<HashMap<String, String>>>,
@@ -10,18 +11,21 @@ struct ServerState {
     leader_port: u16,
     self_port: u16,
     followers: Arc<Mutex<Vec<u16>>>,
+    server_timestamp: SystemTime,
 }
 
 impl ServerState {
     fn new(port: u16, leader_port: u16) -> Self {
         let is_leader = port == leader_port;
         let self_port = port;
+        let server_timestamp = SystemTime::now();
         ServerState {
             db: Arc::new(Mutex::new(HashMap::new())),
             is_leader,
             leader_port,
             self_port,
             followers: Arc::new(Mutex::new(Vec::new())),
+            server_timestamp,
         }
     }
 
