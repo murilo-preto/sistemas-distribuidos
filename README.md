@@ -7,15 +7,17 @@ git clone https://github.com/murilo-preto/sistemas-distribuidos.git
 cd .\sistemas-distribuidos\
 ```
 
-1. Compile server
+2. Compile
 ```powershell
-cd .\server\
 cargo build
 ```
 
-1. Compile client
+3. Run server
 ```powershell
-cd .\client\
-cargo build
+cargo run -p server
 ```
 
+4. Run server
+```powershell
+cargo run -p client
+```
