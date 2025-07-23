@@ -4,12 +4,41 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-fn handle_client(mut client_stream: TcpStream, port: u16, db: Arc<Mutex<HashMap<String, String>>>) {
+// Struct to manage server state
+struct ServerState {
+    db: Arc<Mutex<HashMap<String, String>>>,
+    is_leader: bool,
+    leader_port: u16,
+    followers: Arc<Mutex<Vec<u16>>>,
+}
+
+impl ServerState {
+    fn new(port: u16, leader_port: u16) -> Self {
+        let is_leader = port == leader_port;
+        ServerState {
+            db: Arc::new(Mutex::new(HashMap::new())),
+            is_leader,
+            leader_port,
+            followers: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    fn register_follower(&self, port: u16) {
+        let mut followers = self.followers.lock().unwrap();
+        if !followers.contains(&port) {
+            followers.push(port);
+            println!("[Leader] Registered new follower on port {port}");
+        }
+    }
+}
+
+fn handle_client(mut stream: TcpStream, state: Arc<ServerState>) {
+    let port = state.leader_port;
     println!("[Port {port}] Client connected");
     let mut buffer = [0; 1024];
 
     loop {
-        match client_stream.read(&mut buffer) {
+        match stream.read(&mut buffer) {
             Ok(0) => {
                 println!("[Port {port}] Client disconnected");
                 break;
@@ -22,19 +51,16 @@ fn handle_client(mut client_stream: TcpStream, port: u16, db: Arc<Mutex<HashMap<
                 let parts: Vec<&str> = input.split_whitespace().collect();
 
                 let response = match parts.as_slice() {
-                    ["put", key, value] => {
-                        on_put(key.to_string(), value.to_string(), port, Arc::clone(&db))
-                    }
-                    ["get", key] => on_get(key.to_string(), Arc::clone(&db)),
+                    ["put", key, value] => on_put(key, value, Arc::clone(&state)),
+                    ["get", key] => on_get(key, Arc::clone(&state)),
+                    ["register", port_str] => on_register(port_str, Arc::clone(&state)),
+                    ["replicate", key, value] => on_replicate(key, value, Arc::clone(&state)),
                     ["put", ..] => "ERR: PUT requires 2 arguments\n".to_string(),
                     ["get", ..] => "ERR: GET requires 1 argument\n".to_string(),
-                    ["new_connection"] => "Client requested new connection\n".to_string(),
-                    _ => {
-                        "ERR: Unknown command (valid: PUT <key> <value> | GET <key>)\n".to_string()
-                    }
+                    _ => "ERR: Unknown command\n".to_string(),
                 };
 
-                if client_stream.write_all(response.as_bytes()).is_err() {
+                if stream.write_all(response.as_bytes()).is_err() {
                     break;
                 }
             }
@@ -46,18 +72,114 @@ fn handle_client(mut client_stream: TcpStream, port: u16, db: Arc<Mutex<HashMap<
     }
 }
 
-fn start_server(port: u16) -> std::io::Result<()> {
+fn on_put(key: &str, value: &str, state: Arc<ServerState>) -> String {
+    if state.is_leader {
+        // Update leader's database
+        let mut db = state.db.lock().unwrap();
+        db.insert(key.to_string(), value.to_string());
+        println!("[Leader] Added key: {key}");
+
+        // Replicate to followers
+        let followers = state.followers.lock().unwrap().clone();
+        for follower_port in followers {
+            if let Err(e) = replicate_to_follower(key, value, follower_port) {
+                println!("[Leader] Failed to replicate to {follower_port}: {e}");
+            }
+        }
+
+        format!("OK: Inserted '{key}'='{value}'\n")
+    } else {
+        // Forward to leader
+        let leader_addr = format!("127.0.0.1:{}", state.leader_port);
+        match TcpStream::connect(leader_addr) {
+            Ok(mut stream) => {
+                let cmd = format!("put {} {}\n", key, value);
+                if let Err(e) = stream.write_all(cmd.as_bytes()) {
+                    return format!("ERR: Failed to send to leader: {}\n", e);
+                }
+
+                let mut reader = BufReader::new(&stream);
+                let mut response = String::new();
+                match reader.read_line(&mut response) {
+                    Ok(_) => response,
+                    Err(e) => format!("ERR: Failed to read leader response: {}\n", e),
+                }
+            }
+            Err(e) => {
+                println!("Failed to connect to leader: {e}");
+                format!("ERR: Not leader and failed to connect to leader: {}\n", e)
+            }
+        }
+    }
+}
+
+fn on_get(key: &str, state: Arc<ServerState>) -> String {
+    let db = state.db.lock().unwrap();
+    match db.get(key) {
+        Some(value) => format!("OK: {key}={value}\n"),
+        None => format!("ERR: Key '{key}' not found\n"),
+    }
+}
+
+fn on_register(port_str: &str, state: Arc<ServerState>) -> String {
+    if !state.is_leader {
+        return "ERR: Only leader can register followers\n".to_string();
+    }
+
+    match port_str.parse::<u16>() {
+        Ok(port) => {
+            state.register_follower(port);
+            format!("OK: Registered follower on port {port}\n")
+        }
+        Err(_) => "ERR: Invalid port number\n".to_string(),
+    }
+}
+
+fn on_replicate(key: &str, value: &str, state: Arc<ServerState>) -> String {
+    if state.is_leader {
+        return "ERR: Leader should not receive replicate commands\n".to_string();
+    }
+
+    println!("[Follower] Replicating: {key} = {value}");
+    let mut db = state.db.lock().unwrap();
+    db.insert(key.to_string(), value.to_string());
+    format!("OK: Replicated '{key}'='{value}'\n")
+}
+
+fn replicate_to_follower(key: &str, value: &str, port: u16) -> io::Result<()> {
+    let addr = format!("127.0.0.1:{port}");
+    let mut stream = TcpStream::connect(addr)?;
+    let cmd = format!("replicate {} {}\n", key, value);
+    stream.write_all(cmd.as_bytes())?;
+
+    let mut reader = BufReader::new(&stream);
+    let mut response = String::new();
+    reader.read_line(&mut response)?;
+
+    if response.starts_with("OK:") {
+        Ok(())
+    } else {
+        Err(io::Error::new(io::ErrorKind::Other, response))
+    }
+}
+
+fn start_server(port: u16, leader_port: u16) -> io::Result<()> {
     let listener = TcpListener::bind(format!("127.0.0.1:{port}"))?;
     println!("Server listening on 127.0.0.1:{port}");
 
-    let shared_db = Arc::new(Mutex::new(HashMap::new()));
+    let state = Arc::new(ServerState::new(port, leader_port));
+
+    // Register with leader if this is a follower
+    if !state.is_leader {
+        register_with_leader(port, leader_port)?;
+    }
 
     for stream in listener.incoming() {
-        let db_clone = Arc::clone(&shared_db);
+        let state_clone = Arc::clone(&state);
         match stream {
             Ok(stream) => {
                 thread::spawn(move || {
-                    handle_client(stream, port, db_clone);
+                    handle_client(stream, state_clone);
                 });
             }
             Err(e) => println!("[Port {port}] Error: {e}"),
@@ -66,67 +188,38 @@ fn start_server(port: u16) -> std::io::Result<()> {
     Ok(())
 }
 
-fn on_put(
-    key: String,
-    value: String,
-    port: u16,
-    db: Arc<Mutex<HashMap<String, String>>>,
-) -> String {
-    if port == 10097 {
-        // Leader handling
-        let mut db = db.lock().unwrap();
-        db.insert(key.clone(), value.clone());
-        println!("[Leader] Added key: {key}");
-        format!("OK: Inserted '{key}'='{value}'\n")
+fn register_with_leader(follower_port: u16, leader_port: u16) -> io::Result<()> {
+    let addr = format!("127.0.0.1:{leader_port}");
+    let mut stream = TcpStream::connect(addr)?;
+    let cmd = format!("register {}\n", follower_port);
+    stream.write_all(cmd.as_bytes())?;
+
+    let mut reader = BufReader::new(&stream);
+    let mut response = String::new();
+    reader.read_line(&mut response)?;
+
+    if response.starts_with("OK:") {
+        println!("[Follower] Registered with leader on port {leader_port}");
+        Ok(())
     } else {
-        // Non-leader handling - create transient connection to leader
-        let leader_addr = "127.0.0.1:10097";
-        match TcpStream::connect(leader_addr) {
-            Ok(mut leader_stream) => {
-                println!("[Port {port}] Handed PUT to leader");
-                let command = format!("put {} {}\n", key, value);
-
-                // Send command to leader
-                if let Err(e) = leader_stream.write_all(command.as_bytes()) {
-                    return format!("ERR: Failed to send to leader: {}\n", e);
-                }
-
-                // Read leader's response
-                let mut reader = BufReader::new(&leader_stream);
-                let mut response = String::new();
-                match reader.read_line(&mut response) {
-                    Ok(_) => response, // Includes trailing \n
-                    Err(e) => format!("ERR: Failed reading leader response: {}\n", e),
-                }
-            }
-            Err(e) => {
-                println!("[Port {port}] Leader connection failed: {e}");
-                format!("ERR: Leader connection failed: {}\n", e)
-            }
-        }
+        Err(io::Error::new(io::ErrorKind::Other, response))
     }
 }
 
-fn on_get(key: String, db: Arc<Mutex<HashMap<String, String>>>) -> String {
-    let db = db.lock().unwrap();
-    match db.get(&key) {
-        Some(value) => format!("OK: {key}={value}\n"),
-        None => format!("ERR: Key '{key}' not found\n"),
-    }
-}
-
-fn main() -> std::io::Result<()> {
+fn main() -> io::Result<()> {
     print!("Enter port number: ");
     io::stdout().flush()?;
 
-    let mut line = String::new();
-    io::stdin().lock().read_line(&mut line)?;
-
-    let port: u16 = line
+    let mut port_input = String::new();
+    io::stdin().lock().read_line(&mut port_input)?;
+    let port: u16 = port_input
         .trim()
         .parse()
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Invalid port number"))?;
 
+    // Hardcode leader port for simplicity
+    const LEADER_PORT: u16 = 10097;
+
     println!("Starting server on port {port}...");
-    start_server(port)
+    start_server(port, LEADER_PORT)
 }
