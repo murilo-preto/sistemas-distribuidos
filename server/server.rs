@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::SystemTime;
@@ -36,7 +37,7 @@ impl ServerState {
         let mut followers = self.followers.lock().unwrap();
         if !followers.contains(&port) {
             followers.push(port);
-            println!("[Leader] Registered new follower on port {port}");
+            println!("[Leader] Registered new follower on port {port}\n");
         }
     }
 }
@@ -149,7 +150,24 @@ fn on_put(key: &str, value: &str, state: Arc<ServerState>) -> String {
         let leader_addr = format!("127.0.0.1:{}", state.leader_port);
         match TcpStream::connect(leader_addr) {
             Ok(mut stream) => {
+                let is_connected = Arc::new(AtomicBool::new(true));
                 let cmd = format!("put {key} {value}\n");
+
+                let msg = Message {
+                    command: "put".to_string(),
+                    key: key.to_string(),
+                    value: value.to_string(),
+                    timestamp: SystemTime::now(),
+                };
+
+                let stream = Arc::new(Mutex::new(Some(stream)));
+                if let Err(e) = send_msg(&stream, &msg, &is_connected) {
+                    format!("Error sending PUT command: {e}")
+                } else {
+                    format!("Unhandled")
+                }
+
+                /*
                 let current_port = state.self_port;
                 println!("[Port {current_port}] Forwarding 'put {key} {value}' to leader");
                 if let Err(e) = stream.write_all(cmd.as_bytes()) {
@@ -162,6 +180,7 @@ fn on_put(key: &str, value: &str, state: Arc<ServerState>) -> String {
                     Ok(_) => response,
                     Err(e) => format!("ERR: Failed to read leader response: {e}\n"),
                 }
+                */
             }
             Err(e) => {
                 println!("Failed to connect to leader: {e}");
@@ -248,10 +267,33 @@ fn start_server(port: u16, leader_port: u16) -> io::Result<()> {
 
 fn register_with_leader(follower_port: u16, leader_port: u16) -> io::Result<()> {
     let addr = format!("127.0.0.1:{leader_port}");
-    let mut stream = TcpStream::connect(addr)?;
+
+    let stream = TcpStream::connect(addr)?;
+    let stream_clone = stream.try_clone()?;
+    let protected_stream = Arc::new(Mutex::new(Some(stream_clone)));
+
+    let is_connected = Arc::new(AtomicBool::new(true));
+
+    /*
     let cmd = format!("register {follower_port}\n");
     stream.write_all(cmd.as_bytes())?;
+    */
 
+    let msg = Message {
+        command: "register".to_string(),
+        key: "".to_string(),
+        value: follower_port.to_string(),
+        timestamp: SystemTime::now(),
+    };
+
+    if let Err(e) = send_msg(&protected_stream, &msg, &is_connected) {
+        println!("Error sending PUT command: {e}");
+        Ok(())
+    } else {
+        Ok(())
+    }
+
+    /*
     let mut reader = BufReader::new(&stream);
     let mut response = String::new();
     reader.read_line(&mut response)?;
@@ -260,8 +302,10 @@ fn register_with_leader(follower_port: u16, leader_port: u16) -> io::Result<()> 
         println!("[Follower] Registered with leader on port {leader_port}");
         Ok(())
     } else {
+        println!("Failed to parse server response to follower register");
         Err(io::Error::new(io::ErrorKind::Other, response))
     }
+    */
 }
 
 fn main() -> io::Result<()> {

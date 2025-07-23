@@ -122,9 +122,6 @@ fn main() -> std::io::Result<()> {
                         timestamp: SystemTime::now(),
                     };
 
-                    //println!("Debug Message:\n{:#?}", msg);
-
-                    //if let Err(e) = send_command(&stream, &command, &is_connected) {
                     if let Err(e) = send_msg(&stream, &msg, &is_connected) {
                         println!("Error sending PUT command: {e}");
                     }
