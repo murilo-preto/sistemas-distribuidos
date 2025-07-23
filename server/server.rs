@@ -166,21 +166,6 @@ fn on_put(key: &str, value: &str, state: Arc<ServerState>) -> String {
                 } else {
                     format!("Unhandled")
                 }
-
-                /*
-                let current_port = state.self_port;
-                println!("[Port {current_port}] Forwarding 'put {key} {value}' to leader");
-                if let Err(e) = stream.write_all(cmd.as_bytes()) {
-                    return format!("ERR: Failed to send to leader: {e}\n");
-                }
-
-                let mut reader = BufReader::new(&stream);
-                let mut response = String::new();
-                match reader.read_line(&mut response) {
-                    Ok(_) => response,
-                    Err(e) => format!("ERR: Failed to read leader response: {e}\n"),
-                }
-                */
             }
             Err(e) => {
                 println!("Failed to connect to leader: {e}");
@@ -274,11 +259,6 @@ fn register_with_leader(follower_port: u16, leader_port: u16) -> io::Result<()> 
 
     let is_connected = Arc::new(AtomicBool::new(true));
 
-    /*
-    let cmd = format!("register {follower_port}\n");
-    stream.write_all(cmd.as_bytes())?;
-    */
-
     let msg = Message {
         command: "register".to_string(),
         key: "".to_string(),
@@ -292,20 +272,6 @@ fn register_with_leader(follower_port: u16, leader_port: u16) -> io::Result<()> 
     } else {
         Ok(())
     }
-
-    /*
-    let mut reader = BufReader::new(&stream);
-    let mut response = String::new();
-    reader.read_line(&mut response)?;
-
-    if response.starts_with("OK:") {
-        println!("[Follower] Registered with leader on port {leader_port}");
-        Ok(())
-    } else {
-        println!("Failed to parse server response to follower register");
-        Err(io::Error::new(io::ErrorKind::Other, response))
-    }
-    */
 }
 
 fn main() -> io::Result<()> {
