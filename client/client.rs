@@ -1,3 +1,5 @@
+use rand::rng;
+use rand::seq::SliceRandom;
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -85,11 +87,14 @@ fn main() -> std::io::Result<()> {
                 if is_connected.load(Ordering::SeqCst) {
                     println!("Already connected to a server");
                 } else {
-                    let servers = ["127.0.0.1:10098", "127.0.0.1:10097", "127.0.0.1:10099"];
+                    let mut servers = vec!["127.0.0.1:10097", "127.0.0.1:10098", "127.0.0.1:10099"];
                     let is_connected_clone = is_connected.clone();
                     let stream_clone = stream.clone();
 
                     thread::spawn(move || {
+                        let mut rng = rng();
+                        servers.shuffle(&mut rng);
+
                         for server_addr in &servers {
                             if handle_server_connection(
                                 server_addr,
