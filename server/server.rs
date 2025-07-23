@@ -1,16 +1,13 @@
+use crate::io::BufReader;
 use std::collections::HashMap;
 use std::io::{self, BufRead, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, atomic::AtomicBool};
 use std::thread;
-
-use shared::{connect_to_server, send_command};
 
 fn handle_client(mut stream: TcpStream, port: u16, db: Arc<Mutex<HashMap<String, String>>>) {
     println!("[Port {port}] Client connected");
     let mut buffer = [0; 1024];
-    let is_connected = Arc::new(AtomicBool::new(false));
 
     loop {
         match stream.read(&mut buffer) {
@@ -20,20 +17,15 @@ fn handle_client(mut stream: TcpStream, port: u16, db: Arc<Mutex<HashMap<String,
             }
             Ok(n) => {
                 let message = String::from_utf8_lossy(&buffer[0..n]);
-                let is_connected_clone = is_connected.clone();
                 println!("[Port {}] Received: {}", port, message.trim());
 
                 let input = message.trim();
                 let parts: Vec<&str> = input.split_whitespace().collect();
 
                 let response = match parts.as_slice() {
-                    ["put", key, value] => on_put(
-                        key.to_string(),
-                        value.to_string(),
-                        port,
-                        Arc::clone(&db),
-                        is_connected_clone,
-                    ),
+                    ["put", key, value] => {
+                        on_put(key.to_string(), value.to_string(), port, Arc::clone(&db))
+                    }
                     ["get", key] => on_get(key.to_string(), Arc::clone(&db)),
                     ["put", ..] => "ERR: PUT requires 2 arguments".to_string(),
                     ["get", ..] => "ERR: GET requires 1 argument".to_string(),
@@ -79,31 +71,42 @@ fn on_put(
     value: String,
     port: u16,
     db: Arc<Mutex<HashMap<String, String>>>,
-    is_connected: Arc<AtomicBool>,
 ) -> String {
     if port == 10097 {
+        // Leader handling
         let mut db = db.lock().unwrap();
         db.insert(key.clone(), value.clone());
         println!("[Leader] Added key: {key}");
         format!("OK: Inserted '{key}'='{value}'")
     } else {
-        format!("ERR: Server on port {port} is not leader");
-        if is_connected.load(Ordering::SeqCst) {
-            println!("Server already connected to leader");
-        } else {
-            let leader_addr = "127.0.0.1:10097";
-            match connect_to_server(leader_addr) {
-                Ok(_) => {
-                    println!("A");
-                    //Ok(());
+        // Non-leader handling
+        let leader_addr = "127.0.0.1:10097";
+
+        // Attempt to connect to leader
+        match TcpStream::connect(leader_addr) {
+            Ok(mut stream) => {
+                println!("Handed put request over to leader");
+                let command = format!("put {} {}\n", key, value);
+
+                // Send command to leader
+                if let Err(e) = stream.write_all(command.as_bytes()) {
+                    return format!("ERR: Failed to send command to leader: {}", e);
                 }
-                Err(_e) => {
-                    println!("A");
-                    //Err(e);
+
+                // Read leader's response
+                let mut reader = BufReader::new(&stream);
+                let mut response = String::new();
+                match reader.read_line(&mut response) {
+                    Ok(_) => response,
+                    Err(e) => format!("ERR: Failed to read leader response: {}", e),
                 }
             }
+            Err(e) => {
+                // Connection failed
+                println!("Failed to connect to leader: {}", e);
+                format!("ERR: Not leader and failed to connect to leader: {}", e)
+            }
         }
-        format!("ERR: Server on port {} is not leader", port)
     }
 }
 
