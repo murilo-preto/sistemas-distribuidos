@@ -5,6 +5,9 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::SystemTime;
 
+use shared::Message;
+use shared::send_msg;
+
 struct ServerState {
     db: Arc<Mutex<HashMap<String, String>>>,
     is_leader: bool,
@@ -65,6 +68,52 @@ fn handle_client(mut stream: TcpStream, state: Arc<ServerState>) {
                     ["get", ..] => "ERR: GET requires 1 argument\n".to_string(),
                     ["new_connection", ..] => "New client connection received\n".to_string(),
                     _ => "ERR: Unknown command\n".to_string(),
+                };
+
+                if stream.write_all(response.as_bytes()).is_err() {
+                    break;
+                }
+            }
+            Err(e) => {
+                println!("[Port {port}] Error reading from client: {e}");
+                break;
+            }
+        }
+    }
+}
+
+fn handle_client_serialized(mut stream: TcpStream, state: Arc<ServerState>) {
+    let port = state.self_port;
+    println!("[Port {port}] Client connected");
+    let mut buffer = [0; 1024];
+
+    loop {
+        match stream.read(&mut buffer) {
+            Ok(0) => {
+                println!("[Port {port}] Client disconnected");
+                break;
+            }
+            Ok(n) => {
+                let message_str = String::from_utf8_lossy(&buffer[0..n]);
+                println!("[Port {}] Received raw: {}", port, message_str.trim());
+
+                let parsed: Result<Message, _> = serde_json::from_str(&message_str);
+                let response = match parsed {
+                    Ok(msg) => {
+                        println!("[Port {}] Parsed Message: {:?}", port, msg);
+                        match msg.command.as_str() {
+                            "put" => on_put(&msg.key, &msg.value, Arc::clone(&state)),
+                            "get" => on_get(&msg.key, Arc::clone(&state)),
+                            "register" => on_register(&msg.value, Arc::clone(&state)),
+                            "replicate" => on_replicate(&msg.key, &msg.value, Arc::clone(&state)),
+                            "new_connection" => "New client connection received\n".to_string(),
+                            _ => "ERR: Unknown command\n".to_string(),
+                        }
+                    }
+                    Err(e) => {
+                        println!("[Port {}] Failed to parse message: {}", port, e);
+                        "ERR: Failed to parse message\n".to_string()
+                    }
                 };
 
                 if stream.write_all(response.as_bytes()).is_err() {
@@ -188,7 +237,7 @@ fn start_server(port: u16, leader_port: u16) -> io::Result<()> {
         match stream {
             Ok(stream) => {
                 thread::spawn(move || {
-                    handle_client(stream, state_clone);
+                    handle_client_serialized(stream, state_clone);
                 });
             }
             Err(e) => println!("[Port {port}] Error: {e}"),

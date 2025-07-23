@@ -1,4 +1,3 @@
-use core::time;
 use rand::rng;
 use rand::seq::SliceRandom;
 use std::io::{self, Read, Write};
@@ -8,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::SystemTime;
 
-use shared::{Message, connect_to_server, send_command};
+use shared::{Message, connect_to_server, send_msg};
 
 fn get_input(prompt: &str) -> String {
     println!("{prompt}");
@@ -115,19 +114,18 @@ fn main() -> std::io::Result<()> {
                 if is_connected.load(Ordering::SeqCst) {
                     let key = get_input("Enter key:");
                     let value = get_input("Enter value:");
-                    let timestamp = SystemTime::now();
-                    let command = format!("put {key} {value}\n");
 
                     let msg = Message {
-                        command: command.clone(),
+                        command: "put".to_string(),
                         key,
                         value,
-                        timestamp,
+                        timestamp: SystemTime::now(),
                     };
 
-                    println!("Debug Message:\n{:#?}", msg);
+                    //println!("Debug Message:\n{:#?}", msg);
 
-                    if let Err(e) = send_command(&stream, &command, &is_connected) {
+                    //if let Err(e) = send_command(&stream, &command, &is_connected) {
+                    if let Err(e) = send_msg(&stream, &msg, &is_connected) {
                         println!("Error sending PUT command: {e}");
                     }
                 } else {
@@ -137,8 +135,15 @@ fn main() -> std::io::Result<()> {
             "get" => {
                 if is_connected.load(Ordering::SeqCst) {
                     let key = get_input("Enter key:");
-                    let command = format!("get {key}\n");
-                    if let Err(e) = send_command(&stream, &command, &is_connected) {
+
+                    let msg = Message {
+                        command: "get".to_string(),
+                        key,
+                        value: "".to_string(),
+                        timestamp: SystemTime::now(),
+                    };
+
+                    if let Err(e) = send_msg(&stream, &msg, &is_connected) {
                         println!("Error sending GET command: {e}");
                     }
                 } else {
