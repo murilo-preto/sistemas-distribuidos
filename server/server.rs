@@ -112,7 +112,6 @@ fn on_put(msg: &Message, state: Arc<ServerState>) -> String {
         match TcpStream::connect(leader_addr) {
             Ok(mut stream) => {
                 let is_connected = Arc::new(AtomicBool::new(true));
-                let cmd = format!("put {key} {value}\n");
 
                 let msg = Message {
                     command: "put".to_string(),
@@ -172,6 +171,26 @@ fn on_replicate(key: &str, value: &str, state: Arc<ServerState>) -> String {
 fn replicate_to_follower(key: &str, value: &str, port: u16) -> io::Result<()> {
     let addr = format!("127.0.0.1:{port}");
     let mut stream = TcpStream::connect(addr)?;
+
+    let is_connected = Arc::new(AtomicBool::new(true));
+
+    let msg = Message {
+        command: "replicate".to_string(),
+        key: key.to_string(),
+        value: value.to_string(),
+        timestamp: secs_since_epoch(),
+    };
+
+    let stream = Arc::new(Mutex::new(Some(stream)));
+    if let Err(e) = send_msg(&stream, &msg, &is_connected) {
+        println!("Error sending PUT command: {e}");
+    } else {
+        println!("Unhandled");
+    }
+
+    Ok(())
+
+    /*
     let cmd = format!("replicate {key} {value}\n");
     stream.write_all(cmd.as_bytes())?;
 
@@ -184,6 +203,7 @@ fn replicate_to_follower(key: &str, value: &str, port: u16) -> io::Result<()> {
     } else {
         Err(io::Error::new(io::ErrorKind::Other, response))
     }
+    */
 }
 
 fn start_server(port: u16, leader_port: u16) -> io::Result<()> {
