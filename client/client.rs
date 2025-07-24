@@ -1,11 +1,12 @@
 use rand::rng;
 use rand::seq::SliceRandom;
+use std::env;
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::SystemTime;
+//use std::time::SystemTime;
 
 use shared::{Message, connect_to_server, secs_since_epoch, send_msg};
 
@@ -73,6 +74,15 @@ fn main() -> std::io::Result<()> {
     let is_connected = Arc::new(AtomicBool::new(false));
     let stream = Arc::new(Mutex::new(None::<TcpStream>));
 
+    let args: Vec<String> = env::args().skip(1).collect();
+
+    let servers: Vec<String> = args
+        .iter()
+        .map(|port| format!("127.0.0.1:{}", port))
+        .collect();
+
+    println!("Server list: {:?}", servers);
+
     println!(
         "---\nType:\nINIT - Connect to server\nPUT - To write to database\nGET - To retrieve from database\nEXIT - To quit\n---\n"
     );
@@ -85,7 +95,8 @@ fn main() -> std::io::Result<()> {
                 if is_connected.load(Ordering::SeqCst) {
                     println!("Already connected to a server");
                 } else {
-                    let mut servers = vec!["127.0.0.1:10097", "127.0.0.1:10098", "127.0.0.1:10099"];
+                    //let mut servers = vec!["127.0.0.1:10097", "127.0.0.1:10098", "127.0.0.1:10099"];
+                    let mut servers = servers.clone();
                     let is_connected_clone = is_connected.clone();
                     let stream_clone = stream.clone();
 

@@ -21,3 +21,9 @@ cargo run -p server
 ```powershell
 cargo run -p client
 ```
+
+## Demo video
+```
+https://youtu.be/OoqMcEUhiRg
+```
+[![Demo video](http://img.youtube.com/vi/OoqMcEUhiRg/0.jpg)](http://www.youtube.com/watch?v=r8jQ9hVA2qs "Demo video")
