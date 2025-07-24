@@ -1,10 +1,10 @@
 use std::collections::HashMap;
-use std::io::{self, BufRead, BufReader, Read, Write};
+use std::io::{self, BufRead, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::SystemTime;
+//use std::time::SystemTime;
 
 use shared::{Message, secs_since_epoch, send_msg};
 
@@ -14,21 +14,21 @@ struct ServerState {
     leader_port: u16,
     self_port: u16,
     followers: Arc<Mutex<Vec<u16>>>,
-    server_timestamp: u64,
+    //server_timestamp: u64,
 }
 
 impl ServerState {
     fn new(port: u16, leader_port: u16) -> Self {
         let is_leader = port == leader_port;
         let self_port = port;
-        let server_timestamp = secs_since_epoch();
+        //let server_timestamp = secs_since_epoch();
         ServerState {
             db: Arc::new(Mutex::new(HashMap::new())),
             is_leader,
             leader_port,
             self_port,
             followers: Arc::new(Mutex::new(Vec::new())),
-            server_timestamp,
+            //server_timestamp,
         }
     }
 
@@ -49,17 +49,17 @@ fn handle_client_serialized(mut stream: TcpStream, state: Arc<ServerState>) {
     loop {
         match stream.read(&mut buffer) {
             Ok(0) => {
-                println!("[Port {port}] Client disconnected");
+                //println!("[Port {port}] Client disconnected");
                 break;
             }
             Ok(n) => {
                 let message_str = String::from_utf8_lossy(&buffer[0..n]);
-                println!("[Port {}] Received raw: {}", port, message_str.trim());
+                //println!("[Port {}] Received raw: {}", port, message_str.trim());
 
                 let parsed: Result<Message, _> = serde_json::from_str(&message_str);
                 let response = match parsed {
                     Ok(msg) => {
-                        println!("[Port {}] Parsed Message: {:?}", port, msg);
+                        //println!("[Port {}] Parsed Message: {:?}", port, msg);
                         match msg.command.as_str() {
                             "put" => on_put(&msg, Arc::clone(&state)),
                             "get" => on_get(&msg.key, Arc::clone(&state)),
@@ -110,7 +110,7 @@ fn on_put(msg: &Message, state: Arc<ServerState>) -> String {
         // Forward to leader
         let leader_addr = format!("127.0.0.1:{}", state.leader_port);
         match TcpStream::connect(leader_addr) {
-            Ok(mut stream) => {
+            Ok(stream) => {
                 let is_connected = Arc::new(AtomicBool::new(true));
 
                 let msg = Message {
@@ -124,7 +124,7 @@ fn on_put(msg: &Message, state: Arc<ServerState>) -> String {
                 if let Err(e) = send_msg(&stream, &msg, &is_connected) {
                     format!("Error sending PUT command: {e}")
                 } else {
-                    format!("Unhandled")
+                    format!("[PUT_OK] '{key}':'{value}' -> {timestamp:?}\n")
                 }
             }
             Err(e) => {
@@ -170,7 +170,7 @@ fn on_replicate(key: &str, value: &str, state: Arc<ServerState>) -> String {
 
 fn replicate_to_follower(key: &str, value: &str, port: u16) -> io::Result<()> {
     let addr = format!("127.0.0.1:{port}");
-    let mut stream = TcpStream::connect(addr)?;
+    let stream = TcpStream::connect(addr)?;
 
     let is_connected = Arc::new(AtomicBool::new(true));
 
@@ -185,7 +185,7 @@ fn replicate_to_follower(key: &str, value: &str, port: u16) -> io::Result<()> {
     if let Err(e) = send_msg(&stream, &msg, &is_connected) {
         println!("Error sending PUT command: {e}");
     } else {
-        println!("Unhandled");
+        println!(".");
     }
 
     Ok(())

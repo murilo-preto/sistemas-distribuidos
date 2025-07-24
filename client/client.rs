@@ -25,47 +25,44 @@ fn handle_server_connection(
 ) -> std::io::Result<()> {
     match connect_to_server(server_addr) {
         Ok(mut s) => {
-            is_connected.store(true, Ordering::SeqCst);
-            let message = "new_connection";
-            match s.write_all(message.as_bytes()) {
-                Ok(_) => {
-                    //println!("Sent initial message: '{message}'");
-                    *stream.lock().unwrap() = Some(s);
+            let msg = Message {
+                command: "new_connection".to_string(),
+                key: "".to_string(),
+                value: "".to_string(),
+                timestamp: secs_since_epoch(),
+            };
 
-                    let mut buffer = [0; 1024];
-                    match stream.lock().unwrap().as_mut().unwrap().read(&mut buffer) {
-                        Ok(bytes_read) if bytes_read > 0 => {
-                            println!(
-                                "Initial response: {}",
-                                String::from_utf8_lossy(&buffer[0..bytes_read])
-                            );
-                            println!("Connected successfully!");
-                            Ok(())
-                        }
-                        Ok(_) => {
-                            println!("Connected to {server_addr} but received no response");
-                            Ok(())
-                        }
-                        Err(e) => {
-                            is_connected.store(false, Ordering::SeqCst);
-                            *stream.lock().unwrap() = None;
-                            println!("Error reading from {server_addr}: {e}");
-                            Err(e)
-                        }
-                    }
+            let serialized = serde_json::to_string(&msg)?;
+            s.write_all(serialized.as_bytes())?;
+
+            let mut buffer = [0; 1024];
+            match s.read(&mut buffer) {
+                Ok(bytes_read) if bytes_read > 0 => {
+                    /*
+                    println!(
+                        "Initial response: {}",
+                        String::from_utf8_lossy(&buffer[..bytes_read])
+                    );
+                    */
+                }
+                Ok(_) => {
+                    println!("Connected to {} but received no response", server_addr);
                 }
                 Err(e) => {
-                    is_connected.store(false, Ordering::SeqCst);
-                    *stream.lock().unwrap() = None;
-                    println!("Error sending to {server_addr}: {e}");
-                    Err(e)
+                    println!("Error reading from {}: {}", server_addr, e);
+                    return Err(e);
                 }
             }
+
+            *stream.lock().unwrap() = Some(s);
+            is_connected.store(true, Ordering::SeqCst);
+            println!("Connected successfully to server");
+            Ok(())
         }
         Err(e) => {
+            println!("Failed to connect to {}: {}", server_addr, e);
             is_connected.store(false, Ordering::SeqCst);
             *stream.lock().unwrap() = None;
-            println!("Failed to connect to {server_addr}: {e}");
             Err(e)
         }
     }

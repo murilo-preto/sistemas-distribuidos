@@ -32,7 +32,7 @@ pub fn send_command(
     is_connected: &Arc<AtomicBool>,
 ) -> std::io::Result<()> {
     if let Some(stream) = &mut *stream.lock().unwrap() {
-        println!("Sending: {command}");
+        //println!("Sending: {command}");
         stream.write_all(command.as_bytes())?;
 
         let mut buffer = [0; 1024];
@@ -70,14 +70,14 @@ pub fn send_msg(
 ) -> io::Result<()> {
     if let Some(stream) = &mut *stream.lock().unwrap() {
         let serialized = serde_json::to_string(message)?;
-        println!("Sending: {serialized}");
+        //println!("Sending: {serialized}");
         stream.write_all(serialized.as_bytes())?;
 
         let mut buffer = [0; 1024];
         match stream.read(&mut buffer) {
             Ok(bytes_read) if bytes_read > 0 => {
                 println!(
-                    "Server response: {}",
+                    "Response: {}",
                     String::from_utf8_lossy(&buffer[0..bytes_read])
                 );
                 Ok(())
