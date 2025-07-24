@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::SystemTime;
 
-use shared::{Message, connect_to_server, send_msg};
+use shared::{Message, connect_to_server, secs_since_epoch, send_msg};
 
 fn get_input(prompt: &str) -> String {
     println!("{prompt}");
@@ -29,7 +29,7 @@ fn handle_server_connection(
             let message = "new_connection";
             match s.write_all(message.as_bytes()) {
                 Ok(_) => {
-                    println!("Sent initial message: '{message}'");
+                    //println!("Sent initial message: '{message}'");
                     *stream.lock().unwrap() = Some(s);
 
                     let mut buffer = [0; 1024];
@@ -119,7 +119,7 @@ fn main() -> std::io::Result<()> {
                         command: "put".to_string(),
                         key,
                         value,
-                        timestamp: SystemTime::now(),
+                        timestamp: secs_since_epoch(),
                     };
 
                     if let Err(e) = send_msg(&stream, &msg, &is_connected) {
@@ -137,7 +137,7 @@ fn main() -> std::io::Result<()> {
                         command: "get".to_string(),
                         key,
                         value: "".to_string(),
-                        timestamp: SystemTime::now(),
+                        timestamp: secs_since_epoch(),
                     };
 
                     if let Err(e) = send_msg(&stream, &msg, &is_connected) {

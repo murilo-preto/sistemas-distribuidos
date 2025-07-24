@@ -3,14 +3,21 @@ use std::io::{self, Read, Write};
 use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::SystemTime;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+pub fn secs_since_epoch() -> u64 {
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(duration) => duration.as_secs(),
+        Err(_) => 0, // Could happen if the system clock is set before UNIX_EPOCH
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Message {
     pub command: String,
     pub key: String,
     pub value: String,
-    pub timestamp: SystemTime,
+    pub timestamp: u64,
 }
 
 pub fn connect_to_server(address: &str) -> io::Result<TcpStream> {

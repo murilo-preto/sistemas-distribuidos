@@ -6,8 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::SystemTime;
 
-use shared::Message;
-use shared::send_msg;
+use shared::{Message, secs_since_epoch, send_msg};
 
 struct ServerState {
     db: Arc<Mutex<HashMap<String, String>>>,
@@ -15,14 +14,14 @@ struct ServerState {
     leader_port: u16,
     self_port: u16,
     followers: Arc<Mutex<Vec<u16>>>,
-    server_timestamp: SystemTime,
+    server_timestamp: u64,
 }
 
 impl ServerState {
     fn new(port: u16, leader_port: u16) -> Self {
         let is_leader = port == leader_port;
         let self_port = port;
-        let server_timestamp = SystemTime::now();
+        let server_timestamp = secs_since_epoch();
         ServerState {
             db: Arc::new(Mutex::new(HashMap::new())),
             is_leader,
@@ -38,47 +37,6 @@ impl ServerState {
         if !followers.contains(&port) {
             followers.push(port);
             println!("[Leader] Registered new follower on port {port}\n");
-        }
-    }
-}
-
-fn handle_client(mut stream: TcpStream, state: Arc<ServerState>) {
-    let port = state.self_port;
-    println!("[Port {port}] Client connected");
-    let mut buffer = [0; 1024];
-
-    loop {
-        match stream.read(&mut buffer) {
-            Ok(0) => {
-                println!("[Port {port}] Client disconnected");
-                break;
-            }
-            Ok(n) => {
-                let message = String::from_utf8_lossy(&buffer[0..n]);
-                println!("[Port {}] Received: {}", port, message.trim());
-
-                let input = message.trim();
-                let parts: Vec<&str> = input.split_whitespace().collect();
-
-                let response = match parts.as_slice() {
-                    ["put", key, value] => on_put(key, value, Arc::clone(&state)),
-                    ["get", key] => on_get(key, Arc::clone(&state)),
-                    ["register", port_str] => on_register(port_str, Arc::clone(&state)),
-                    ["replicate", key, value] => on_replicate(key, value, Arc::clone(&state)),
-                    ["put", ..] => "ERR: PUT requires 2 arguments\n".to_string(),
-                    ["get", ..] => "ERR: GET requires 1 argument\n".to_string(),
-                    ["new_connection", ..] => "New client connection received\n".to_string(),
-                    _ => "ERR: Unknown command\n".to_string(),
-                };
-
-                if stream.write_all(response.as_bytes()).is_err() {
-                    break;
-                }
-            }
-            Err(e) => {
-                println!("[Port {port}] Error reading from client: {e}");
-                break;
-            }
         }
     }
 }
@@ -103,7 +61,7 @@ fn handle_client_serialized(mut stream: TcpStream, state: Arc<ServerState>) {
                     Ok(msg) => {
                         println!("[Port {}] Parsed Message: {:?}", port, msg);
                         match msg.command.as_str() {
-                            "put" => on_put(&msg.key, &msg.value, Arc::clone(&state)),
+                            "put" => on_put(&msg, Arc::clone(&state)),
                             "get" => on_get(&msg.key, Arc::clone(&state)),
                             "register" => on_register(&msg.value, Arc::clone(&state)),
                             "replicate" => on_replicate(&msg.key, &msg.value, Arc::clone(&state)),
@@ -129,7 +87,10 @@ fn handle_client_serialized(mut stream: TcpStream, state: Arc<ServerState>) {
     }
 }
 
-fn on_put(key: &str, value: &str, state: Arc<ServerState>) -> String {
+fn on_put(msg: &Message, state: Arc<ServerState>) -> String {
+    let key = msg.key.clone();
+    let value = msg.value.clone();
+    let timestamp = msg.timestamp.clone();
     if state.is_leader {
         // Update leader's database
         let mut db = state.db.lock().unwrap();
@@ -139,12 +100,12 @@ fn on_put(key: &str, value: &str, state: Arc<ServerState>) -> String {
         // Replicate to followers
         let followers = state.followers.lock().unwrap().clone();
         for follower_port in followers {
-            if let Err(e) = replicate_to_follower(key, value, follower_port) {
+            if let Err(e) = replicate_to_follower(&key, &value, follower_port) {
                 println!("[Leader] Failed to replicate to {follower_port}: {e}");
             }
         }
 
-        format!("OK: Inserted '{key}'='{value}'\n")
+        format!("[PUT_OK] '{key}':'{value}' -> {timestamp:?}\n")
     } else {
         // Forward to leader
         let leader_addr = format!("127.0.0.1:{}", state.leader_port);
@@ -157,7 +118,7 @@ fn on_put(key: &str, value: &str, state: Arc<ServerState>) -> String {
                     command: "put".to_string(),
                     key: key.to_string(),
                     value: value.to_string(),
-                    timestamp: SystemTime::now(),
+                    timestamp: secs_since_epoch(),
                 };
 
                 let stream = Arc::new(Mutex::new(Some(stream)));
@@ -263,7 +224,7 @@ fn register_with_leader(follower_port: u16, leader_port: u16) -> io::Result<()> 
         command: "register".to_string(),
         key: "".to_string(),
         value: follower_port.to_string(),
-        timestamp: SystemTime::now(),
+        timestamp: secs_since_epoch(),
     };
 
     if let Err(e) = send_msg(&protected_stream, &msg, &is_connected) {
